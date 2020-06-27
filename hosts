@@ -1,5 +1,5 @@
 [all]
-dell-r640-015.dsal.lab.eng.pek2.redhat.com ansible_host=10.73.104.25
+dell-r640-015
 
 [all:vars]
 ansible_user=root

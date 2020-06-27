@@ -51,7 +51,6 @@
   tasks:
 
     - set_fact:
-        # image: "quay.io/coreos/etcd-operator"
         imageWithDigest: "quay.io/coreos/etcd-operator@sha256:66a37fd61a06a43969854ee6d3e21087a98b93838e284a6086b13917f96b0d9b"
         etcdWithDigest: "quay.io/coreos/etcd@sha256:e372648462335719b21c5410d5a064a470953a73d59b587611a75f6dfe0d6fba"
 
@@ -78,18 +77,8 @@
         mkdir -p /root/cdoan/sk
         cd /root/cdoan/sk
         /root/bin/oc image mirror --force --insecure {{ etcdWithDigest }} dell-r640-015:5000/coreos/etcd -a /tmp/auth.json 2>&1 | tee -a mirror.log
+        # /root/bin/oc image mirror --force --insecure {{ imageWithDigest }} file://coreos/etcd-operator --dir=images 2>&1 | tee -a mirror.log
       register: mirror
-
-    # /root/bin/oc image mirror --force --insecure {{ imageWithDigest }} file://coreos/etcd-operator --dir=images 2>&1 | tee -a mirror.log
-    # - name: mirror quay image {{ image }}
-    #   shell: |
-    #     mkdir -p /root/cdoan/sk
-    #     cd /root/cdoan/sk
-    #     /root/bin/oc image mirror --force --insecure {{ image }} dell-r640-015:5000/coreos/etcd-operator -a /tmp/auth.json 2>&1 | tee -a mirror.log
-    #     /root/bin/oc image mirror --force --insecure {{ image }} file://coreos/etcd-operator --dir=images 2>&1 | tee -a mirror.log
-    #   register: mirror
-
-    # - debug: msg={{ mirror.stdout }}
 
     - name: output
       debug:

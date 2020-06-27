@@ -1,53 +1,26 @@
 ---
 
-- name: Network Getting Started First Playbook
+- name: Deploy generic registry
   # connection: network_cli
   gather_facts: true
   hosts: all
   tasks:
 
     - set_fact:
-        baremetal_net_ipv6: false
         # path under which to store RHCOS images
         dr_rhcos_caching_dir: /opt/cached_disconnected_images
         # path under which to store container images
         dr_container_registry_dir: /opt/registry
-        # disconnected registry address
         dr_registry_address: ''
-        # disconnected registry port
         dr_registry_port: 5000
-        # url to the image to mirror for e.g.:
-        #   registry.svc.ci.openshift.org/ocp/release:4.4.0-0.nightly-2020-04-09-220855
-        dr_openshift_release_image: ''
-        # OCP major version, for e.g.: 4
-        dr_ocp_major_version: ''
-        # OCP minor version, for e.g.: 5
-        dr_ocp_minor_version: ''
-        # disconnected registry user
-        dr_registry_user: ocp-edge
-        # disconnected registry password
-        dr_registry_pass: ocp-edge-pass
+        dr_registry_user: registry-user
+        dr_registry_pass: registry-password
         # path to pull-secret file
         dr_pull_secret_file:  "{{ ansible_facts['user_dir'] }}/pull-secret.txt"
-        # path to auth file for disconnected registry
         dr_registry_pull_secret_file: "{{ ansible_facts['user_dir'] }}/private-mirror-secret.json"
-        # path to file of combined dr_pull_secret_file and dr_registry_pull_secret_file
         dr_combined_pull_secret_file: "{{ ansible_facts['user_dir'] }}/combined-secret.json"
-        # temporary log file
-        # openshift_version: 4.4.0
         mirror_log: /tmp/tmp_image_mirror-4.log
-        # disk threshold when to start cleaning
         disk_avail_thresh: 150000000
-        # install/configure registry container
-        dr_configure_registry: true
-        # copy the images and update payload for a given release from one registry to another
-        dr_mirror_release_payload: true
-        # mirror RHCOS images
-        dr_mirror_rhcos_images: true
-
-    - name: Display the config
-      debug:
-        msg: "The hostname is and the OS"
 
     - debug:
         var: inventory_hostname
@@ -59,10 +32,8 @@
         state: present
       loop:
         - 'jq'
-        # - 'podman'
+        - 'podman'
         - 'httpd-tools'
-        # - 'python3-firewall'
-        # - 'libguestfs-tools-c'
 
     - name: create registry directories
       become: true
@@ -183,20 +154,19 @@
     - name: run command
       debug:
         msg:
-        - 'podman run -d --net host --name registry -p {{ dr_registry_port }}:5000 \'
-        - '-v {{ dr_container_registry_dir }}/data:/var/lib/registry:z \'
-        - '-v {{ dr_container_registry_dir }}/auth:/auth:z \'
-        - '-v {{ dr_container_registry_dir }}/config:/etc/docker/registry:z \'
-        - '-v {{ dr_container_registry_dir }}/certs:/certs:z \'
-        - '-e "REGISTRY_AUTH=htpasswd" \'
-        - '-e "REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm" \'
-        - '-e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \'
-        - '-e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.crt \'
-        - '-e REGISTRY_HTTP_TLS_KEY=/certs/registry.key \'
-        - '-e REGISTRY_STORAGE_DELETE_ENABLED=true \'
-        - 'docker.io/library/registry:2'
+        - "podman run -d --net host --name registry -p {{ dr_registry_port }}:5000 \"
+        - "-v {{ dr_container_registry_dir }}/data:/var/lib/registry:z \"
+        - "-v {{ dr_container_registry_dir }}/auth:/auth:z \"
+        - "-v {{ dr_container_registry_dir }}/config:/etc/docker/registry:z \"
+        - "-v {{ dr_container_registry_dir }}/certs:/certs:z \"
+        - "-e 'REGISTRY_AUTH=htpasswd' \"
+        - "-e 'REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm' \"
+        - "-e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \"
+        - "-e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.crt \"
+        - "-e REGISTRY_HTTP_TLS_KEY=/certs/registry.key \"
+        - "-e REGISTRY_STORAGE_DELETE_ENABLED='true' \"
+        - "docker.io/library/registry:2"
       register: debugout
-
     
     - name: output
       debug:
