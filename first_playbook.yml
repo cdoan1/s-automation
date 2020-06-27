@@ -1,0 +1,209 @@
+---
+
+- name: Network Getting Started First Playbook
+  # connection: network_cli
+  gather_facts: true
+  hosts: all
+  tasks:
+
+    - set_fact:
+        baremetal_net_ipv6: false
+        # path under which to store RHCOS images
+        dr_rhcos_caching_dir: /opt/cached_disconnected_images
+        # path under which to store container images
+        dr_container_registry_dir: /opt/registry
+        # disconnected registry address
+        dr_registry_address: ''
+        # disconnected registry port
+        dr_registry_port: 5000
+        # url to the image to mirror for e.g.:
+        #   registry.svc.ci.openshift.org/ocp/release:4.4.0-0.nightly-2020-04-09-220855
+        dr_openshift_release_image: ''
+        # OCP major version, for e.g.: 4
+        dr_ocp_major_version: ''
+        # OCP minor version, for e.g.: 5
+        dr_ocp_minor_version: ''
+        # disconnected registry user
+        dr_registry_user: ocp-edge
+        # disconnected registry password
+        dr_registry_pass: ocp-edge-pass
+        # path to pull-secret file
+        dr_pull_secret_file:  "{{ ansible_facts['user_dir'] }}/pull-secret.txt"
+        # path to auth file for disconnected registry
+        dr_registry_pull_secret_file: "{{ ansible_facts['user_dir'] }}/private-mirror-secret.json"
+        # path to file of combined dr_pull_secret_file and dr_registry_pull_secret_file
+        dr_combined_pull_secret_file: "{{ ansible_facts['user_dir'] }}/combined-secret.json"
+        # temporary log file
+        # openshift_version: 4.4.0
+        mirror_log: /tmp/tmp_image_mirror-4.log
+        # disk threshold when to start cleaning
+        disk_avail_thresh: 150000000
+        # install/configure registry container
+        dr_configure_registry: true
+        # copy the images and update payload for a given release from one registry to another
+        dr_mirror_release_payload: true
+        # mirror RHCOS images
+        dr_mirror_rhcos_images: true
+
+    - name: Display the config
+      debug:
+        msg: "The hostname is and the OS"
+
+    - debug:
+        var: inventory_hostname
+
+    - name: install packages for container registry
+      become: true
+      package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - 'jq'
+        # - 'podman'
+        - 'httpd-tools'
+        # - 'python3-firewall'
+        # - 'libguestfs-tools-c'
+
+    - name: create registry directories
+      become: true
+      file:
+        path: "{{ item }}"
+        owner: "{{ ansible_facts['user_id'] }}"
+        group: "{{ ansible_facts['user_id'] }}"
+        mode: 0755
+        state: directory
+      loop:
+        - "{{ dr_container_registry_dir }}"
+        - "{{ dr_container_registry_dir }}/auth"
+        - "{{ dr_container_registry_dir }}/certs"
+        - "{{ dr_container_registry_dir }}/data"
+        - "{{ dr_container_registry_dir }}/config"
+
+    - name: set registry facts
+      set_fact:
+        ssl_host_name: "{{ ansible_facts['fqdn'] }}"
+        ssl_host_name_short: "{{ ansible_facts['hostname'] }}"
+
+    - name: assert registry private key does not exist
+      file:
+        path: "{{ dr_container_registry_dir }}/certs/registry.key"
+        state: absent
+
+    - name: generate private key
+      openssl_privatekey:
+        owner: "{{ ansible_facts['user_id'] }}"
+        path: "{{ dr_container_registry_dir }}/certs/registry.key"
+        size: 2048
+        state: present
+
+    - name: assert registry cert does not exist
+      file:
+        path: "{{ dr_container_registry_dir }}/certs/registry.crt"
+        state: absent
+
+    - name: create temporary openssl.conf
+      tempfile:
+        state: file
+        suffix: registry_openssl_conf
+      register: openssl_conf
+
+    - name: create openssl.conf
+      template:
+        src: openssl.conf.j2
+        dest: "{{ openssl_conf.path }}"
+
+    - name: create registry config.yml
+      template:
+        src: config.yml
+        dest: "{{ dr_container_registry_dir }}/config/config.yml"
+
+    - name: generate ssl certificate
+      shell: |
+        openssl req -x509 \
+            -key {{dr_container_registry_dir}}/certs/registry.key \
+            -out  {{dr_container_registry_dir}}/certs/registry.crt \
+            -days 365 \
+            -config {{ openssl_conf.path }} \
+            -extensions SAN \
+            -subj "/C=US/ST=NC/L=Raleigh/O=Test Company/OU=Testing/CN={{ ssl_host_name }}"
+
+    - name: remove temporary openssl.conf
+      file:
+        path: "{{ openssl_conf.path }}"
+        state: absent
+
+    - name: create {{ dr_container_registry_dir }}/auth/htpasswd file
+      become: true
+      file:
+        path: "{{ dr_container_registry_dir }}/auth/htpasswd"
+        state: touch
+        mode: 0644
+        owner: "{{ ansible_facts['user_id'] }}"
+
+    - name: create {{ dr_registry_user }} creds
+      command: |
+        htpasswd -bB {{ dr_container_registry_dir }}/auth/htpasswd {{ dr_registry_user }} {{ dr_registry_pass }}
+
+    - name: copy registry cert to /etc/pki/ca-trust/source/anchors/
+      become: true
+      copy:
+        src: "{{ dr_container_registry_dir }}/certs/registry.crt"
+        dest: /etc/pki/ca-trust/source/anchors/
+        remote_src: true
+
+    - name: update CA trusted store
+      become: true
+      command: update-ca-trust
+
+    - name: register registry cert to be used in install-config
+      command: "cat {{ dr_container_registry_dir }}/certs/registry.crt"
+      register: registry_cert
+
+    - name: remove any running registry container
+      become: true
+      shell: |
+        podman rm registry -f || true
+
+    - name: start registry container
+      become: true
+      shell: |
+        podman run -d --net host --name registry -p {{ dr_registry_port }}:5000 \
+          -v {{ dr_container_registry_dir }}/data:/var/lib/registry:z \
+          -v {{ dr_container_registry_dir }}/auth:/auth:z \
+          -v {{ dr_container_registry_dir }}/config:/etc/docker/registry:z \
+          -v {{ dr_container_registry_dir }}/certs:/certs:z \
+          -e "REGISTRY_AUTH=htpasswd" \
+          -e "REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm" \
+          -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+          -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.crt \
+          -e REGISTRY_HTTP_TLS_KEY=/certs/registry.key \
+          -e REGISTRY_STORAGE_DELETE_ENABLED=true \
+          docker.io/library/registry:2
+
+    - name: run command
+      debug:
+        msg:
+        - 'podman run -d --net host --name registry -p {{ dr_registry_port }}:5000 \'
+        - '-v {{ dr_container_registry_dir }}/data:/var/lib/registry:z \'
+        - '-v {{ dr_container_registry_dir }}/auth:/auth:z \'
+        - '-v {{ dr_container_registry_dir }}/config:/etc/docker/registry:z \'
+        - '-v {{ dr_container_registry_dir }}/certs:/certs:z \'
+        - '-e "REGISTRY_AUTH=htpasswd" \'
+        - '-e "REGISTRY_AUTH_HTPASSWD_REALM=Registry Realm" \'
+        - '-e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \'
+        - '-e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/registry.crt \'
+        - '-e REGISTRY_HTTP_TLS_KEY=/certs/registry.key \'
+        - '-e REGISTRY_STORAGE_DELETE_ENABLED=true \'
+        - 'docker.io/library/registry:2'
+      register: debugout
+
+    
+    - name: output
+      debug:
+        var=debugout.stdout_lines
+
+    - name: fetch registry certificate
+      fetch:
+        src: "{{ dr_container_registry_dir }}/certs/registry.crt"
+        dest: registry.crt
+        flat: true

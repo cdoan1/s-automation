@@ -1,0 +1,96 @@
+---
+
+#  You may omit the tag argument on a source or use the ' *' wildcard to select all or matching tags to mirror. The
+# destination must be a repository in that case.
+
+#  When using file mirroring, the --dir and --from-dir flags control the location on disk that content will be stored to.
+# This directory mirrors the HTTP structure of a container registry and separates layers and data (blobs) from image
+# metadata (manifests). If --from-dir is not specified, --dir or the current working directory is used.
+
+#  Images in manifest list format will be copied as-is unless you use --filter-by-os to restrict the allowed images to
+# copy in a manifest list. This flag has no effect on regular images.
+
+# Usage:
+#   oc image mirror SRC DST [DST ...] [flags]
+
+# Examples:
+
+#   # Copy image to another registry
+#   oc image mirror myregistry.com/myimage:latest docker.io/myrepository/myimage:stable
+
+#   # Copy image to disk, creating a directory structure that can be served as a registry
+#   oc image mirror myregistry.com/myimage:latest file://myrepository/myimage:latest
+
+# Options:
+#       --dir='': The directory on disk that file:// images will be copied under.
+#       --dry-run=false: Print the actions that would be taken and exit without writing to the destinations.
+#   -f, --filename=[]: One or more files to read SRC=DST or SRC DST [DST ...] mappings from.
+#       --filter-by-os='': A regular expression to control which images are considered when multiple variants are
+# available. Images will be passed as '<platform>/<architecture>[/<variant>]'.
+#       --force=false: Attempt to write all layers and manifests even if they exist in the remote repository.
+#       --from-dir='': The directory on disk that file:// images will be read from. Overrides --dir
+#       --insecure=false: Allow push and pull operations to registries to be made over HTTP
+#       --keep-manifest-list=false: If an image is part of a manifest list, always mirror the list even if only one image
+# is found. The default is to mirror the specific image unless unless --filter-by-os is '.*'.
+#       --max-per-registry=6: Number of concurrent requests allowed per registry.
+#       --max-registry=4: Number of concurrent registries to connect to at any one time.
+#   -a, --registry-config='': Path to your registry credentials (defaults to ~/.docker/config.json)
+#       --s3-source-bucket=[]: A list of bucket/path locations on S3 that may contain already uploaded blobs. Add [store]
+# to the end to use the container image registry path convention.
+#       --skip-missing=false: If an input image is not found, skip them.
+#       --skip-mount=false: Always push layers instead of cross-mounting them
+#       --skip-multiple-scopes=false: Some registries do not support multiple scopes passed to the registry login.
+#       --skip-verification=false: Skip verifying the integrity of the retrieved content. This is not recommended, but may
+# be necessary when importing images from older image registries. Only bypass verification if the registry is known to be
+# trustworthy.
+
+
+- name: Verify SKOPEO COPY
+  gather_facts: false
+  hosts: all
+  tasks:
+
+    - set_fact:
+        # image: "quay.io/coreos/etcd-operator"
+        imageWithDigest: "quay.io/coreos/etcd-operator@sha256:66a37fd61a06a43969854ee6d3e21087a98b93838e284a6086b13917f96b0d9b"
+        etcdWithDigest: "quay.io/coreos/etcd@sha256:e372648462335719b21c5410d5a064a470953a73d59b587611a75f6dfe0d6fba"
+
+    - name: Display the config
+      debug:
+        msg: "imageWithDigest: {{ imageWithDigest }}"
+
+    - debug:
+        var: inventory_hostname
+
+    - name: mirror quay image {{ imageWithDigest }}
+      shell: |
+        mkdir -p /root/cdoan/sk
+        cd /root/cdoan/sk
+        /root/bin/oc image mirror --force --insecure {{ imageWithDigest }} dell-r640-015:5000/coreos/etcd-operator -a /tmp/auth.json 2>&1 | tee -a mirror.log
+      register: mirror
+
+    - name: output
+      debug:
+        var=mirror.stdout_lines
+
+    - name: mirror quay image {{ imageWithDigest }}
+      shell: |
+        mkdir -p /root/cdoan/sk
+        cd /root/cdoan/sk
+        /root/bin/oc image mirror --force --insecure {{ etcdWithDigest }} dell-r640-015:5000/coreos/etcd -a /tmp/auth.json 2>&1 | tee -a mirror.log
+      register: mirror
+
+    # /root/bin/oc image mirror --force --insecure {{ imageWithDigest }} file://coreos/etcd-operator --dir=images 2>&1 | tee -a mirror.log
+    # - name: mirror quay image {{ image }}
+    #   shell: |
+    #     mkdir -p /root/cdoan/sk
+    #     cd /root/cdoan/sk
+    #     /root/bin/oc image mirror --force --insecure {{ image }} dell-r640-015:5000/coreos/etcd-operator -a /tmp/auth.json 2>&1 | tee -a mirror.log
+    #     /root/bin/oc image mirror --force --insecure {{ image }} file://coreos/etcd-operator --dir=images 2>&1 | tee -a mirror.log
+    #   register: mirror
+
+    # - debug: msg={{ mirror.stdout }}
+
+    - name: output
+      debug:
+        var=mirror.stdout_lines

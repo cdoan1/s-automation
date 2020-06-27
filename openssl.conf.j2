@@ -1,0 +1,21 @@
+[req]
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]
+CN = {{ ansible_facts['hostname'] }}
+
+[SAN]
+basicConstraints=CA:TRUE,pathlen:0
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = registry.{{ ansible_facts['hostname'] }}
+DNS.2 = {{ ansible_facts['hostname'] }}
+{% if baremetal_net_ipv6|bool %}
+{% set ip_version = 'ipv6' %}
+{% else %}
+{% set ip_version = 'ipv4' %}
+{% endif %}
+{% for _ip in hostvars[inventory_hostname]['ansible_facts']['all_' + ip_version + '_addresses'] %}
+IP.{{ loop.index }} = {{ _ip }}
+{% endfor %}
